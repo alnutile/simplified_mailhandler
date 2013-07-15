@@ -1,0 +1,241 @@
+<?php
+
+/**
+ * -User not in system move email to NotProcessed
+ *   -watchdog records this
+ * -Box should be empty relative to date of existing check
+ *   -watchdog records this
+ * -Error on node create moves mail to Error box
+ *   -watchdog records this
+ * -Sucess move to Processed
+ *   -watchdog records this
+ * -Node made w/ attachments
+ * -Make sure user is subscribed to their node
+ * -Test Body has content
+ */
+
+/**
+ * Need webtests for db related tests
+ */
+class SimpleMailHanderTestCase extends DrupalWebTestCase {
+  protected $privileged_user;
+
+  public static function getInfo() {
+    return array(
+      'name' => 'SimpleMailHander Webtests',
+      'description' => 'Test SimpleMailHander ',
+      'group' => 'SimplifiedMailHandler',
+    );
+  }
+
+  public function setUp() {
+    parent::setUp('simplified_mailhandler', 'dblog', 'simplemailhandlertasknode');  // Enable any modules required for the test
+    // Create and log in our user. The user has the arbitrary privilege
+    // 'extra special edit any simpletest_example' which the code uses
+    // to grant access.
+    
+    // Create a user assigned to that role.
+    $edit = array();
+    $edit['name']   = 'administrator';
+    $edit['mail']   = 'administrator@localhost';
+    $edit['pass']   = user_password();
+    $edit['status'] = 1;
+
+    $account = user_save(drupal_anonymous_user(), $edit);
+    $this->assertTrue(!empty($account->uid), t('User created with name %name and pass %pass', array('%name' => $edit['name'], '%pass' => $edit['pass'])), t('User login'));
+    if (empty($account->uid)) {
+      return FALSE;
+    }
+  }
+
+  // Create a simpletest_example node using the node form
+  public function testSimplifiedMailHandlerUserFunction() { 
+    //Test User not in system
+    $userObject = SimplifiedUserIsInSystem::userInSystem('admin@loco');
+    $message = 'The User is NOT in the system';
+    $this->assertFalse($userObject, $message); 
+
+    //Test User in the System
+    $userObject = SimplifiedUserIsInSystem::userInSystem('administrator@localhost');
+    $message = 'The User is in the system';
+    $this->assertTrue($userObject, $message);   
+  
+    //Have to test a special email box 
+    //I will reset it after
+    //user name testmailhandler/password
+    $newConneciton = new SimplifiedConnect;
+    $imap = $newConneciton->imapConnect('testmailhandler', 'password', 'localhost', '143', array('notls', 'norsh', 'novalidate-cert'));
+    $numMessages = $newConneciton->numConnections($imap);
+    $message = 'Should find 3 items in the mailbox';
+    $this->assertEqual($numMessages, 3, $message);   
+    
+    //Making nodes
+    //This should make 2 nodes
+    //One with Attachments
+    $newConneciton = new SimplifiedConnect;
+    $imap = $newConneciton->imapConnect('testmailhandler', 'password', 'localhost', '143', array('notls', 'norsh', 'novalidate-cert'));
+    
+    for ($count = 1; $count <= ($numMessages); $count++) {
+    	$header = imap_header($imap, $count);
+    	$imapUid = imap_uid($imap, $count);
+    	$userObject = SimplifiedUserIsInSystem::userInSystem($header->senderaddress);
+      //Test Subject to see if this is the Attachment one
+      if($header->Subject == 'test with attachment') {
+        $make_node = simple_mailhander_task_maker($header, $userObject, $imapUid, $imap, $count);    
+        }
+    }
+    //Now that node should be in the system w/ Two attachments
+    //$this->verbose('Node created: ' . var_export($make_node, TRUE));
+    
+    $filesArray = $make_node->field_files['und'];
+    $message = 'Should find 2 Files';
+    $this->assertEqual(count($filesArray), 2, $message);
+    
+    $file1name = $make_node->field_files['und'][0]['title'];
+    $message = 'File 1 Name should be Test.pdf';
+    $this->assertIdentical($file1name, 'Test.pdf', $message);      
+
+    $file2name = $make_node->field_files['und'][1]['title'];
+    $message = 'File 2 Name should be test.png';
+    $this->assertIdentical($file2name, 'test.png', $message);
+    
+    //Now testing moving emails out of the box
+    //After running this the inbox should be empty
+    //Though I need to replace it back after
+    $newConneciton = new SimplifiedConnect;
+    $imap = $newConneciton->imapConnect('testmailhandler', 'password', 'localhost', '143', array('notls', 'norsh', 'novalidate-cert'));
+    $numMessages = $newConneciton->numConnections($imap);
+    if( $numMessages > 0 ) {    
+      for ($count = 1; $count <= ($numMessages); $count++) {
+      	$header = imap_header($imap, $count);
+      	$imapUid = imap_uid($imap, $count);
+      	$userObject = SimplifiedUserIsInSystem::userInSystem($header->senderaddress);
+        //Test Subject to see if this is the Attachment one
+      	if($userObject !== FALSE) {
+        	//Make nodes
+        	$make_node = simple_mailhander_task_maker($header, $userObject, $imapUid, $imap, $count);
+        	//If node is made move it to Processed
+        	$move_node = new SimplifiedMailHandlerMoveNode();
+        	if($make_node->nid) {
+        	 $move_node->moveMail(
+        	   $imap, $count, 'Processed', WATCHDOG_ERROR, 
+        	   'Email %title Processed', array('%title' => $header->Subject)
+        	 );
+        	} else {
+        	 $move_node->moveMail(
+        	   $imap, $count, 'Error', WATCHDOG_ERROR, 
+        	   'Problem processing email titled %title', array('%title' => $header->Subject)
+        	 );
+        	} 
+        } else {
+          //Move to Not-Processed 
+          //since no user exists 
+          //let staff manage it.
+        	$move_node = new SimplifiedMailHandlerMoveNode();
+        	
+          $move_node->moveMail(
+        	   $imap, $count, 'NotProcessed', WATCHDOG_NOTICE, 
+        	   'User @user not in system', array('@user' => $header->senderaddress, '@title' => $header->Subject)
+        	 );
+        }       
+      }
+    }
+    //Clean up after the above
+    @imap_expunge($imap);
+   
+    
+    //Mailbox should be empty
+    $newConneciton = new SimplifiedConnect;
+    $imap = $newConneciton->imapConnect('testmailhandler', 'password', 'localhost', '143', array('notls', 'norsh', 'novalidate-cert'));
+    $numMessages = $newConneciton->numConnections($imap);
+    $message = 'Should find 0 items in the INBOX all moved mailbox';
+    $this->assertEqual($numMessages, 0, $message);       
+    
+    //Mailbox should have 2    
+    $newConneciton = new SimplifiedConnect;
+    $imap = $newConneciton->imapConnect('testmailhandler', 'password', 'localhost', '143', array('notls', 'norsh', 'novalidate-cert'), 'Processed');
+    $numMessages = $newConneciton->numConnections($imap);
+    $message = 'Should find 2 items in the Processed mailbox';
+    $this->assertEqual($numMessages, 2, $message);      
+    
+    //Mailbox should have 1
+    $newConneciton = new SimplifiedConnect;
+    $imap = $newConneciton->imapConnect('testmailhandler', 'password', 'localhost', '143', array('notls', 'norsh', 'novalidate-cert'), 'NotProcessed');
+    $numMessages = $newConneciton->numConnections($imap);
+    $message = 'Should find 1 items in the NotProcessed mailbox';
+    $this->assertEqual($numMessages, 1, $message); 
+    
+    //Move them all back to INBOX
+    $newConneciton = new SimplifiedConnect;
+    $imap = $newConneciton->imapConnect('testmailhandler', 'password', 'localhost', '143', array('notls', 'norsh', 'novalidate-cert'), 'Processed');     
+    $numMessages = $newConneciton->numConnections($imap);
+    for ($count = 1; $count <= ($numMessages); $count++) {
+      $move_node = new SimplifiedMailHandlerMoveNode();
+      $move_node->moveMail(
+        	   $imap, $count, 'INBOX', WATCHDOG_ERROR, 
+        	   'Email %title Processed', array('%title' => $header->Subject)
+        	 );     
+    
+    }
+    @imap_expunge($imap);
+
+    $newConneciton = new SimplifiedConnect;
+    $imap = $newConneciton->imapConnect('testmailhandler', 'password', 'localhost', '143', array('notls', 'norsh', 'novalidate-cert'), 'NotProcessed');     
+    $numMessages = $newConneciton->numConnections($imap);
+    for ($count = 1; $count <= ($numMessages); $count++) {
+      $move_node = new SimplifiedMailHandlerMoveNode();
+      $move_node->moveMail(
+        	   $imap, $count, 'INBOX', WATCHDOG_ERROR, 
+        	   'Email %title Processed', array('%title' => $header->Subject)
+        	 );     
+    
+    }
+    @imap_expunge($imap);
+
+      
+  }
+  /**
+   * Detect if we're running on PIFR testbot; skip intentional failure in that
+   * case. It happens that on the testbot the site under test is in a directory
+   * named 'checkout' or 'site_under_test'.
+   *
+   * @return boolean
+   *   TRUE if running on testbot.
+   */
+  public function runningOnTestbot() {
+    //return (file_exists("../checkout") || file_exists("../site_under_test"));
+  }
+}
+
+
+/**
+ * Unit testing
+ * Beware dblog will fail
+ * and dbqueries will fail
+ */
+class SimplifiedMailHandlerTestCase extends DrupalUnitTestCase {
+  public static function getInfo() {
+    return array(
+      'name' => 'Simplified MailHander Tests',
+      'description' => 'Test Connections',
+      'group' => 'SimplifiedMailHandler',
+    );
+  }
+
+  function setUp() {
+    drupal_load('module', 'simplified_mailhandler');
+    parent::setUp();
+  }  
+
+  /**
+   * Call simpletest_example_empty_mysql_date and check that it returns correct
+   * result.
+   *
+   * Note that no environment is provided; we're just testing the correct
+   * behavior of a function when passed specific arguments.
+   */
+  public function testSimplifiedMailHandlerConnectFunction() {
+
+  }
+}
+

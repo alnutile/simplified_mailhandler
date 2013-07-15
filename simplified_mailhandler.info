@@ -1,0 +1,9 @@
+name = Simplified MaiHandler
+description = Easier system to get emails and make nodes. Include attachments.
+package = Project Managment
+core = 7.x
+files[] = simplified_mailhandler.test
+; stylesheets[all][] = node.css
+; scripts[] = somescript.js
+configure = admin/config/simplified_mailhandler
+; more info http://drupal.org/node/542202

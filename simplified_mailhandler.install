@@ -1,0 +1,67 @@
+<?php
+/**
+ * @file
+ * Storing data about the user
+ * The user has a week out look so we will store that.
+ * The user has vactation days so we will store those as well
+ * Thank example modules dbtng
+ */
+
+/**
+ * Implements hook_schema().
+ *
+ * Defines the database tables used by this module.
+ * Remember that the easiest way to create the code for hook_schema is with
+ * the @link http://drupal.org/project/schema schema module @endlink
+ *
+ * @see hook_schema()
+ * @ingroup dbtng_example
+ */
+function simplified_mailhandler_schema() {
+	$schema['simplified_mailhandler_message'] = array(
+		'description' => 'Messages Sent and to who',
+		'fields' => array(
+			'pid'  => array(
+				'type' => 'serial',
+				'not null' => TRUE,
+				'description' => 'Primary Key: Unique week ID.',
+			),
+			'entity_id' => array(
+				'type' => 'int',
+				'not null' => TRUE,
+				'default' => 0,
+				'description' => "The ID of the message",
+			),
+			'type' => array(
+				'type' => 'varchar',
+				'length' => 12,
+				'not null' => FALSE,
+				'description' => "node or comment",
+			),
+			'who' => array(
+				'description' => 'Serialized array of who it was sent to',
+				'type' => 'blob',
+				'not null' => TRUE,
+				'size' => 'big',
+			),
+			'time' => array(
+				'type' => 'int',
+				'length' => 11,
+				'not null' => TRUE,
+				'default' => 0,
+				'description' => "time triggered",
+			),
+		),
+		'primary key' => array('pid'),
+	);
+
+	return $schema;
+}
+
+
+/**
+ * Add table for simplified mailhandler
+ */
+function simplified_mailhandler_update_7100() {
+	//drupal_install_schema('simplified_mailhandler');
+}
