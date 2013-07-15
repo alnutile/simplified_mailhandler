@@ -1,6 +1,8 @@
 simplified_mailhandler
 ======================
 
+Made about December 2012 to help centralize emails as tickets.
+
 Part of the Project Manager suite. Needed a more concise system to manage incoming emails and attachments.
 
 Turn off the Mail Comment and Mail Node Feed modules
